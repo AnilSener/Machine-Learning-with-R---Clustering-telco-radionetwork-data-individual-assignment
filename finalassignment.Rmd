@@ -1,0 +1,149 @@
+#Individual Assignment for Statistical Learning Class
+#AUTHOR:ANIL SENER
+#The purpose of this assignment was to use clustering methodsin telecommunication radio #network daily timeseries data (minute of day versus connection period of each mobile phone to the base station) from 50 different base stations to identify whether the base #station is located in near a road/ railway or not. I am keeping the data anonymous to #secure the data protection rights of my provider. However this nice piece of R code #achieved %100 success with a simple metholodology exploiting descriptive stats. (Although #I was thinking I missed one base station) Another methodology might be using Time Series #Clustering with advanced distance measures but it would be very complicated and slower #algorithm to handle tens of thousands of documents daily.
+#Potential use cases that I can think of are smart city planning and administration,
+#scheduling in transportation industry,advertising optimization etc. 
+#The results are provided in the image files
+
+
+#Storing files to different dataframes
+```{r}
+require(plyr)
+require(dostats)
+library(TTR)
+library(psych)
+files <- list.files(pattern = ".csv", full.names=FALSE)
+
+df_list<-list()
+for (i in seq_along(files)) {
+
+    assign(paste(files[[i]]), read.csv(files[i],sep=";",header=FALSE))
+
+    df_list[[i]]<-assign(paste(paste(files[[i]], i, sep = ""), "summary", sep = "."), 
+           ldply(get(paste(files[[i]])), dostats, sum, min, mean, median, max,sd,skew,mad))
+ 
+}
+
+```
+
+#Building new dataframe based on descriptive stats summary of no of minutes to jump from one antenna to another for each file
+
+```{r}
+df <- data.frame()
+for (i in seq_along(df_list)) {
+  df <- rbind(df, df_list[[i]][df_list[[i]]$.id=="V2",])
+  
+}
+df<-cbind(df,files)
+```
+
+
+
+#Plotting Standard deviations of each file 
+```{r}
+library(ggplot2)
+
+ggplot (aes(x=files, y=sd), data=df) +
+    geom_point()
+```
+#compared to other features sd seems to provide a better distinction between files
+
+
+#Executing k-means clustering algorithm
+```{r}
+km.out <- kmeans(df$sd,2,nstart=20)
+
+# append cluster assignment
+df <- data.frame(df, km.out$cluster)
+km.out$withinss
+km.out$betweenss/km.out$totss
+
+```
+#Within cluster sum of squares by cluster:
+#[1] 52262.88 51767.15
+#between_SS / total_SS =  [1] 0.8128258 %
+
+
+#plotting the SD instances for k-means clustering 
+```{r}
+ggplot (aes(x=files, y=sd), data=df) +
+    geom_point(color=df$km.out.cluster)
+
+```
+
+#Probing hcluster
+```{r}
+hc.complete <- hclust(dist(df$sd), method="complete")
+plot(hc.complete)
+hcluster <- cutree(hc.complete, 2)
+df <- data.frame(df, hcluster)
+```
+
+
+#plotting the SD instances for hclustering 
+```{r}
+ggplot (aes(x=files, y=sd), data=df) +
+    geom_point(color=df$hcluster)
+
+```
+
+
+
+
+#Assigning clusters to the full dataset
+```{r}
+filenames <- list.files(pattern="*.csv", full.names=FALSE)
+
+for (i in seq_along(filenames)){
+       
+  # if the merged dataset doesn't exist, create it
+  if (!exists("dataset")){
+    dataset <- read.table(filenames[[i]], header=FALSE, sep=";")
+    dataset <- cbind(dataset,filenames[[i]])
+    dataset <- cbind(dataset,km.out$cluster[[i]])
+    dataset <- cbind(dataset,hcluster[[i]])
+  }
+   
+  # if the merged dataset does exist, append to it
+  if (exists("dataset")){
+    temp_dataset <-read.table(filenames[[i]], header=FALSE, sep=";")
+    temp_dataset <- cbind(temp_dataset,filenames[[i]])
+    temp_dataset <- cbind(temp_dataset,km.out$cluster[[i]])
+    temp_dataset <- cbind(temp_dataset,hcluster[[i]])
+    dataset<-rbind(dataset, temp_dataset)
+    rm(temp_dataset)
+  }
+ 
+}
+colnames(dataset)[3] <- "filename"
+colnames(dataset)[4] <- "kcluster"
+colnames(dataset)[5] <- "hcluster"
+```
+
+#Plotting each file based on cluster it is belonging to (kmeans)
+```{r}
+ggplot (aes(x=V1, y=V2, color=factor(kcluster)), data=dataset) +
+    geom_point(size=1)+ facet_wrap(~filename)
+```
+#Plotting each file based on cluster it is belonging to (hcluster)
+
+```{r}
+ggplot (aes(x=V1, y=V2, color=factor(hcluster)), data=dataset) +
+    geom_point(size=1)+ facet_wrap(~filename)
+```
+
+
+#Exporting the road & random labels to an excel file
+```{r}
+output<-as.data.frame(cbind(as.vector(filenames),as.vector(hcluster)))
+output$label[output$V2 == 1]<-"random"
+output$label[output$V2 == 2]<-"road"
+output<-output[,2:3]
+colnames(output)[1]<-"file"
+colnames(output)[2]<-"label"
+library(xlsx)
+write.xlsx(output, "output.xlsx")
+```
+
+Summary:
+Hierarchical Clustering with euclidian distance provided the best result in labelling the roads (24 out of 25). I have also tried all other distance methods, most of them provided similar results. I also wanted to use mahalanobis distance however I couldn't make mahalanobis() function to work for singular vector with and inverted covariance matrix. Labelling scheme is organized as "random" or "road" format. 
